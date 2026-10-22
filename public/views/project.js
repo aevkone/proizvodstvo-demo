@@ -1,4 +1,4 @@
-import { state, api, esc, can, dfull, badge, toast, needsComment, routeStrip, diffDays, plural, busy } from '../lib.js';
+import { state, api, esc, can, dfull, dm, money, badge, toast, needsComment, routeStrip, diffDays, plural, busy } from '../lib.js';
 import { icon } from '../icons.js';
 
 export async function renderProject(el, id) {
@@ -69,17 +69,31 @@ function draw(el, p, justDone) {
       <div><span>Клиент</span>${esc(p.client_name || '—')}</div>
       <div><span>Старт</span><span class="num">${dfull(p.start_date)}</span></div>
       <div><span>Срок сдачи клиенту</span><span class="num">${dfull(p.due_date)}</span></div>
+      <div><span>Прогноз сдачи</span>${p.forecast_due ? `<span class="num ${p.forecast_slip > 0 ? 'bad-text' : ''}">${dfull(p.forecast_due)}</span>${p.forecast_slip > 0 ? ` <span class="bad-text">+${p.forecast_slip} дн. к сроку</span>` : ' <span class="faint">в срок</span>'}` : '—'}</div>
       <div><span>Согласование с заказчиком</span>${
         can('project.approval')
           ? `<select class="input" id="approval" aria-label="Статус согласования">${approvalOpts.map(([k, v]) => `<option value="${k}" ${k === p.approval_status ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>`
           : esc(p.approval_label)}</div>
       ${p.notes ? `<div style="grid-column:1/-1"><span>Примечание</span>${esc(p.notes)}</div>` : ''}
+      <div style="grid-column:1/-1"><span>Расчёты стоимости</span>${p.estimates?.length
+        ? p.estimates.map((e) => `<a href="#/calc/${e.id}">№${e.id} ${esc(e.title)}</a> — <span class="num">${money(e.totals.net)}</span> без НДС`).join('<br>')
+        : `<span class="faint">Расчёта нет</span>${can('calc.edit') ? ` · <a href="#/calc/new?project=${p.id}">посчитать стоимость</a>` : ''}`}</div>
     </div>
+
+    ${fullEdit && p.stages.some((s) => s.is_test) ? `
+    <form class="panel edit-panel no-print" id="reworkf" hidden aria-labelledby="rw-title">
+      <div class="field" style="grid-column:1/-1">
+        <label for="rw-result" id="rw-title">Результат испытаний — что не прошло и что дорабатываем *</label>
+        <textarea class="input" id="rw-result" rows="2" required placeholder="Например: заусенец на вырубке 0,2 мм, подогнать зазор матрицы"></textarea>
+        <small>Будут добавлены этапы: разборка → подгонка → повторная сборка → повторные испытания (итерация ${p.stages.filter((s) => s.is_rework && s.is_test).length + 2}). Договорной срок не меняется — сдвиг покажет прогноз сдачи.</small>
+      </div>
+      <div class="actions"><button class="btn primary" type="submit">Добавить цикл доработки</button><button class="btn ghost" type="button" id="rwcancel">Отмена</button></div>
+    </form>` : ''}
 
     <section class="panel" aria-label="Этапы" data-tour="stages">
       <div class="stages-wrap">
-        <table class="stages">
-          <thead><tr><th style="width:40px"><span hidden>Статус</span></th><th>Этап</th>${fullEdit ? '<th>Ответственный</th>' : ''}<th>План</th><th>Факт</th><th class="no-print" style="width:150px"></th></tr></thead>
+        <table class="stages ${fullEdit ? 'has-resp-col' : ''}">
+          <thead><tr><th style="width:40px"><span hidden>Статус</span></th><th>Этап</th>${fullEdit ? '<th class="col-resp">Ответственный</th>' : ''}<th>План</th><th>Факт</th><th class="no-print" style="width:150px"></th></tr></thead>
           <tbody id="tb"></tbody>
         </table>
       </div>
@@ -100,6 +114,10 @@ function draw(el, p, justDone) {
     const fact = val(s, 'fact_date');
     const live = { plan_date: plan, fact_date: fact };
     const isCur = s.id === curId && !fact;
+    const idx = p.stages.indexOf(s);
+    const prevDone = p.stages.slice(0, idx).every((x) => val(x, 'fact_date'));
+    const planMoved = plan !== s.plan_date;
+    const reason = edits.get(s.id)?.reason || '';
     let dotCls = 'dot';
     let dotIn = '';
     if (fact) { dotCls += diffDays(fact, plan) > 0 ? ' done_late' : ' done'; dotIn = icon('check', 14); if (justDone === s.id) dotCls += ' snap'; }
@@ -113,25 +131,38 @@ function draw(el, p, justDone) {
     const hist = (s.comments || []).filter((c) => c.text !== s.comment).slice(-3);
     const label = fact ? (lateDays > 0 ? `выполнен с опозданием ${lateDays} дн.` : 'выполнен') : isCur ? 'текущий этап' : lateDays > 0 ? 'просрочен' : 'впереди';
     let cmt = '';
+    const reasonBox = planMoved ? `<div class="comment-box ${'reason' in (edits.get(s.id) || {}) && !reason ? '' : ''}" data-rbox="${s.id}" style="margin-bottom:8px">
+          <label for="r${s.id}">${icon('alert', 14)}Перенос плана ${dm(s.plan_date)} → ${dm(plan)} — причина обязательна, попадёт в журнал</label>
+          <textarea id="r${s.id}" data-id="${s.id}" data-k="reason" aria-required="true" placeholder="Например: печь на ремонте до 25.10">${esc(reason)}</textarea>
+        </div>` : '';
+    const changes = (s.changes || []).filter((c) => c.field === 'plan_date');
+    const histChanges = changes.length ? `<div class="hist">${changes.slice(-3).map((c) => `<div>${esc(c.created_at.slice(0, 10).split('-').reverse().join('.'))} · ${esc(c.user_name || '')}: план ${dm(c.old_value)} → ${dm(c.new_value)}${c.reason ? ` — ${esc(c.reason)}` : ''}</div>`).join('')}</div>` : '';
+    if (reasonBox) {
+      cmt = `<tr class="cmt"><td></td><td colspan="${cols - 1}">${reasonBox}</td></tr>`;
+    }
     if (editable && (need || comment)) {
-      cmt = `<tr class="cmt"><td></td><td colspan="${cols - 1}">
+      cmt = `<tr class="cmt"><td></td><td colspan="${cols - 1}">${reasonBox}
         <div class="comment-box" data-box="${s.id}">
           <label for="c${s.id}">${need && !s.comment ? `${icon('alert', 14)}Отклонение от срока — напишите, почему задержка и что делается` : need ? `${icon('alert', 14)}Комментарий об отклонении` : 'Комментарий'}</label>
           <textarea id="c${s.id}" data-id="${s.id}" data-k="comment" ${need ? 'required aria-required="true"' : ''} placeholder="Например: поставка стали задержалась на 2 дня, завершение ожидается 25.10">${esc(comment)}</textarea>
           ${hist.length ? `<div class="hist">${hist.map((c) => `<div>${esc(c.created_at.slice(0, 10).split('-').reverse().join('.'))} · ${esc(c.user_name || '')}: ${esc(c.text)}</div>`).join('')}</div>` : ''}
         </div></td></tr>`;
     } else if (comment) {
-      cmt = `<tr class="cmt"><td></td><td colspan="${cols - 1}"><div class="comment-ro"><b>Комментарий ответственного:</b> ${esc(comment)}</div></td></tr>`;
+      cmt = `<tr class="cmt"><td></td><td colspan="${cols - 1}">${reasonBox}<div class="comment-ro"><b>Комментарий ответственного:</b> ${esc(comment)}${histChanges}</div></td></tr>`;
+    } else if (histChanges && !reasonBox) {
+      cmt = `<tr class="cmt"><td></td><td colspan="${cols - 1}"><div class="comment-ro"><b>Переносы плана:</b>${histChanges}</div></td></tr>`;
     }
     return `
       <tr class="${isCur ? 'cur' : fact ? '' : 'future'}" data-row="${s.id}">
-        <td><span class="${dotCls}" role="img" aria-label="${label}">${dotIn}</span></td>
-        <td><span class="sname">${s.pos}. ${esc(s.name)}</span>${s.is_rework ? '<span class="rework">доработка</span>' : ''}${!fullEdit ? `<span class="sresp">${esc(s.responsible_name || 'ответственный не назначен')}</span>` : ''}</td>
-        ${fullEdit ? `<td><select data-id="${s.id}" data-k="responsible_id" aria-label="Ответственный за этап ${s.pos}" class="${'responsible_id' in ch ? 'changed' : ''}"><option value="">—</option>${respOpts}</select></td>` : ''}
-        <td>${fullEdit ? `<input type="date" data-id="${s.id}" data-k="plan_date" value="${esc(plan || '')}" aria-label="План этапа ${s.pos}" class="${'plan_date' in ch ? 'changed' : ''}">` : `<span class="date-ro">${dfull(plan)}</span>`}
-          ${!fact && lateDays > 0 ? `<span class="late-note">−${lateDays} дн.</span>` : ''}</td>
-        <td>${editable ? `<input type="date" data-id="${s.id}" data-k="fact_date" value="${esc(fact || '')}" aria-label="Факт этапа ${s.pos}" class="${'fact_date' in ch ? 'changed' : ''}">` : `<span class="date-ro">${dfull(fact)}</span>`}</td>
-        <td class="no-print">${editable && !fact && isCur ? `<button class="btn small" data-done="${s.id}" data-tour="done">${icon('check', 14)}Готово сегодня</button>` : ''}</td>
+        <td class="c-dot"><span class="${dotCls}" role="img" aria-label="${label}">${dotIn}</span></td>
+        <td class="c-name"><span class="sname">${s.pos}. ${esc(s.name)}</span>${s.is_rework ? '<span class="rework">доработка</span>' : ''}<span class="sresp">${esc(s.responsible_name || 'ответственный не назначен')}</span></td>
+        ${fullEdit ? `<td class="col-resp"><select data-id="${s.id}" data-k="responsible_id" aria-label="Ответственный за этап ${s.pos}" class="${'responsible_id' in ch ? 'changed' : ''}"><option value="">—</option>${respOpts}</select></td>` : ''}
+        <td class="c-plan" data-label="План">${fullEdit ? `<input type="date" data-id="${s.id}" data-k="plan_date" value="${esc(plan || '')}" aria-label="План этапа ${s.pos}" class="${'plan_date' in ch ? 'changed' : ''}">` : `<span class="date-ro">${dfull(plan)}</span>`}
+          ${!fact && lateDays > 0 ? `<span class="late-note">просрочен ${lateDays} дн.</span>` : ''}
+          ${s.moved_days ? `<span class="moved-note" title="Базовый план ${dfull(s.baseline_plan_date)}">базовый ${dm(s.baseline_plan_date)} · ${s.moved_days > 0 ? '+' : ''}${s.moved_days} дн.</span>` : ''}
+          ${!fact && s.forecast_date && s.forecast_date !== plan ? `<span class="fc-note">прогноз ${dm(s.forecast_date)}</span>` : ''}</td>
+        <td class="c-fact" data-label="Факт">${editable ? `<input type="date" data-id="${s.id}" data-k="fact_date" value="${esc(fact || '')}" max="${today}" aria-label="Факт этапа ${s.pos}" class="${'fact_date' in ch ? 'changed' : ''}">` : `<span class="date-ro">${dfull(fact)}</span>`}</td>
+        <td class="c-act no-print">${editable && !fact && prevDone ? `<button class="btn small" data-done="${s.id}" data-tour="done">${icon('check', 14)}Готово сегодня</button>` : ''}</td>
       </tr>${cmt}`;
   };
 
@@ -141,6 +172,7 @@ function draw(el, p, justDone) {
     saveBtn.innerHTML = `${icon('check', 16)}Сохранить${edits.size ? ` <span class="dirty-count">${edits.size}</span>` : ''}`;
     el.querySelector('#undo').hidden = edits.size === 0;
     el.querySelector('#savebar').classList.toggle('dirty', edits.size > 0);
+    el.querySelector('#savebar').hidden = edits.size === 0;
     el.querySelector('#hint').textContent = edits.size ? `Не сохранено: ${plural(edits.size, 'этап', 'этапа', 'этапов')}` : 'Изменения увидят все, у кого есть доступ к проекту';
     setDirty();
   };
@@ -155,11 +187,13 @@ function draw(el, p, justDone) {
     const cur = edits.get(id) || {};
     cur[k] = v;
     // правка, вернувшая исходное значение, не считается изменением
-    for (const key of Object.keys(cur)) if ((cur[key] ?? null) === (s[key] ?? null)) delete cur[key];
+    for (const key of Object.keys(cur)) if (key !== 'reason' && (cur[key] ?? null) === (s[key] ?? null)) delete cur[key];
+    if (!('plan_date' in cur)) delete cur.reason;
     if (Object.keys(cur).length) edits.set(id, cur); else edits.delete(id);
     if (k === 'comment') { refreshBar(); return; }
     render();
-    if (needsComment({ plan_date: val(s, 'plan_date'), fact_date: val(s, 'fact_date') }, today) && !val(s, 'comment')) {
+    if (k === 'plan_date' && val(s, 'plan_date') !== s.plan_date) el.querySelector(`#r${id}`)?.focus();
+    else if (needsComment({ plan_date: val(s, 'plan_date'), fact_date: val(s, 'fact_date') }, today) && !val(s, 'comment')) {
       el.querySelector(`#c${id}`)?.focus();
     }
   };
@@ -171,7 +205,16 @@ function draw(el, p, justDone) {
     setEdit(Number(t.dataset.id), t.dataset.k, v);
   });
   tb.addEventListener('input', (e) => {
-    if (e.target.dataset.k === 'comment') setEdit(Number(e.target.dataset.id), 'comment', e.target.value);
+    const k = e.target.dataset.k;
+    if (k === 'comment') setEdit(Number(e.target.dataset.id), 'comment', e.target.value);
+    if (k === 'reason') {
+      const id = Number(e.target.dataset.id);
+      const cur = edits.get(id) || {};
+      cur.reason = e.target.value;
+      edits.set(id, cur);
+      e.target.removeAttribute('aria-invalid');
+      e.target.closest('.comment-box')?.classList.remove('err');
+    }
   });
   tb.addEventListener('click', (e) => {
     const b = e.target.closest('[data-done]');
@@ -186,13 +229,29 @@ function draw(el, p, justDone) {
   async function save(snapId) {
     // проверка до отправки — те же правила, что на сервере
     const missing = [];
+    const noReason = [];
     for (const [id, ch] of edits) {
       const s = p.stages.find((x) => x.id === id);
+      if ('plan_date' in ch && !String(ch.reason || '').trim()) noReason.push(s);
       const live = { plan_date: val(s, 'plan_date'), fact_date: val(s, 'fact_date') };
       if (needsComment(live, today) && !String(val(s, 'comment') || '').trim()) missing.push(s);
       if (!fullEdit) { delete ch.plan_date; delete ch.responsible_id; }
     }
-    el.querySelectorAll('.comment-box').forEach((b) => b.classList.toggle('err', missing.some((s) => String(s.id) === b.dataset.box)));
+    el.querySelectorAll('.comment-box[data-box]').forEach((b) => {
+      const bad = missing.some((s) => String(s.id) === b.dataset.box);
+      b.classList.toggle('err', bad);
+      b.querySelector('textarea')?.setAttribute('aria-invalid', bad ? 'true' : 'false');
+    });
+    el.querySelectorAll('.comment-box[data-rbox]').forEach((b) => {
+      const bad = noReason.some((s) => String(s.id) === b.dataset.rbox);
+      b.classList.toggle('err', bad);
+      b.querySelector('textarea')?.setAttribute('aria-invalid', bad ? 'true' : 'false');
+    });
+    if (noReason.length) {
+      toast(`Этап «${noReason[0].name}»: укажите причину переноса плана`, true);
+      el.querySelector(`#r${noReason[0].id}`)?.focus();
+      return;
+    }
     if (missing.length) {
       toast(`Этап «${missing[0].name}»: напишите, почему задержка и что делается`, true);
       el.querySelector(`#c${missing[0].id}`)?.focus();
@@ -227,17 +286,28 @@ function draw(el, p, justDone) {
     }
   });
 
-  el.querySelector('#rework')?.addEventListener('click', async (ev) => {
-    if (edits.size && !confirm('Есть несохранённые изменения — они пропадут. Продолжить?')) return;
-    if (!confirm('Добавить цикл доработки (разборка → подгонка → повторная сборка → повторные испытания) после испытаний? Срок сдачи сдвинется на 5 дней.')) return;
-    busy(ev.currentTarget, true);
+  const rwf = el.querySelector('#reworkf');
+  el.querySelector('#rework')?.addEventListener('click', () => {
+    if (!rwf) return;
+    rwf.hidden = !rwf.hidden;
+    if (!rwf.hidden) rwf.querySelector('textarea').focus();
+  });
+  el.querySelector('#rwcancel')?.addEventListener('click', () => { rwf.hidden = true; });
+  rwf?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const result = rwf.querySelector('textarea').value.trim();
+    if (!result) { rwf.querySelector('textarea').setAttribute('aria-invalid', 'true'); toast('Опишите результат испытаний', true); return; }
+    if (edits.size && !confirm('Есть несохранённые изменения этапов — они пропадут. Продолжить?')) return;
+    const btn = rwf.querySelector('[type=submit]');
+    busy(btn, true);
     try {
       window.__dirty = false;
-      draw(el, await api(`/projects/${p.id}/rework`, { method: 'POST' }));
-      toast('Цикл доработки добавлен, срок сдачи сдвинут');
+      const np = await api(`/projects/${p.id}/rework`, { method: 'POST', body: { result } });
+      toast(np.forecast_slip > 0 ? `Цикл доработки добавлен. Прогноз сдачи: +${np.forecast_slip} дн. к сроку` : 'Цикл доработки добавлен');
+      draw(el, np);
     } catch (e) {
       toast(e.message, true);
-      busy(ev.currentTarget, false);
+      busy(btn, false);
     }
   });
 

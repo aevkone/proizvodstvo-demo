@@ -1,4 +1,8 @@
-import { tx } from './db.js';
+import { tx, getSetting } from './db.js';
+
+// НДС в РФ с 01.01.2026 — 22%. Значение по умолчанию можно изменить в справочнике «Реквизиты и ТКП».
+export const DEFAULT_VAT_PCT = 22;
+export const vatDefault = (db) => Number(getSetting(db, 'vat_pct', DEFAULT_VAT_PCT));
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -47,12 +51,13 @@ export function validateEstimate(b) {
 
 export function saveEstimate(db, id, b, userId) {
   return tx(db, () => {
-    const vals = [String(b.title).trim(), b.client_id || null, b.project_id || null, Number(b.markup_pct) || 0, Number(b.vat_pct ?? 20), b.notes || null];
+    const vat = b.vat_pct === undefined || b.vat_pct === null || b.vat_pct === '' ? vatDefault(db) : Number(b.vat_pct);
+    const vals = [String(b.title).trim(), b.client_id || null, b.project_id || null, Number(b.markup_pct) || 0, vat, b.notes || null];
     if (id) {
-      db.prepare('UPDATE estimates SET title = ?, client_id = ?, project_id = ?, markup_pct = ?, vat_pct = ?, notes = ? WHERE id = ?').run(...vals, id);
+      db.prepare("UPDATE estimates SET title = ?, client_id = ?, project_id = ?, markup_pct = ?, vat_pct = ?, notes = ?, updated_at = datetime('now') WHERE id = ?").run(...vals, id);
       db.prepare('DELETE FROM estimate_lines WHERE estimate_id = ?').run(id);
     } else {
-      id = Number(db.prepare('INSERT INTO estimates (title, client_id, project_id, markup_pct, vat_pct, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)').run(...vals, userId).lastInsertRowid);
+      id = Number(db.prepare("INSERT INTO estimates (title, client_id, project_id, markup_pct, vat_pct, notes, created_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))").run(...vals, userId).lastInsertRowid);
     }
     const ins = db.prepare('INSERT INTO estimate_lines (estimate_id, kind, name, unit, qty, price) VALUES (?, ?, ?, ?, ?, ?)');
     for (const l of b.lines) ins.run(id, l.kind, String(l.name).trim(), l.unit || null, Number(l.qty) || 0, Number(l.price) || 0);

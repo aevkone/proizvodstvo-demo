@@ -44,7 +44,7 @@ export async function renderCalc(el, id, projectId) {
     const p = projects.find((x) => x.id === projectId);
     e = {
       title: p ? `${p.title} — ${p.client_name || ''}`.replace(/ — $/, '') : '',
-      client_id: p?.client_id || null, project_id: p?.id || null, markup_pct: 20, vat_pct: 20, notes: '',
+      client_id: p?.client_id || null, project_id: p?.id || null, markup_pct: 20, vat_pct: Number(refs.settings?.vat_pct ?? 22), notes: '',
       lines: [
         { kind: 'material', name: '', unit: 'кг', qty: 0, price: 0 },
         { kind: 'labor', name: '', unit: 'н/ч', qty: 0, price: 0 },
@@ -66,9 +66,9 @@ export async function renderCalc(el, id, projectId) {
     <div class="calc">
       <div>
         <div class="panel edit-panel">
-          <div class="field" style="grid-column:span 2"><label>Название расчёта *</label><input class="input" id="title" value="${esc(e.title)}" ${dis}></div>
-          <div class="field"><label>Клиент</label><select class="input" id="client" ${dis}><option value="">—</option>${refs.clients.map((c) => `<option value="${c.id}" ${c.id === e.client_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
-          <div class="field"><label>Проект</label><select class="input" id="project" ${dis}><option value="">— без проекта —</option>${projects.map((p) => `<option value="${p.id}" ${p.id === e.project_id ? 'selected' : ''}>${esc(p.code)}. ${esc(p.title)}</option>`).join('')}</select></div>
+          <div class="field" style="grid-column:span 2"><label for="title">Название расчёта *</label><input class="input" id="title" value="${esc(e.title)}" ${dis}></div>
+          <div class="field"><label for="client">Клиент</label><select class="input" id="client" ${dis}><option value="">—</option>${refs.clients.map((c) => `<option value="${c.id}" ${c.id === e.client_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+          <div class="field"><label for="project">Проект</label><select class="input" id="project" ${dis}><option value="">— без проекта —</option>${projects.map((p) => `<option value="${p.id}" ${p.id === e.project_id ? 'selected' : ''}>${esc(p.code)}. ${esc(p.title)}</option>`).join('')}</select></div>
         </div>
         <div class="panel section"><h2>Материалы и комплектующие <small id="s-material"></small></h2>
           <table class="lines"><thead><tr><th>Наименование</th><th style="width:64px">Ед.</th><th style="width:84px">Кол-во</th><th style="width:100px">Цена, ₽</th><th style="width:108px;text-align:right">Сумма</th><th style="width:30px"></th></tr></thead><tbody data-kind="material"></tbody></table>
@@ -82,7 +82,7 @@ export async function renderCalc(el, id, projectId) {
           <table class="lines"><thead><tr><th>Наименование</th><th style="width:64px">Ед.</th><th style="width:84px">Кол-во</th><th style="width:100px">Цена, ₽</th><th style="width:108px;text-align:right">Сумма</th><th style="width:30px"></th></tr></thead><tbody data-kind="other"></tbody></table>
           ${ro ? '' : '<button class="btn small ghost" data-add="other">+ Расход</button>'}
         </div>
-        <div class="field"><label>Примечание (попадёт в ТКП)</label><textarea class="input" id="notes" rows="2" ${dis}>${esc(e.notes || '')}</textarea></div>
+        <div class="field"><label for="notes">Примечание (попадёт в ТКП)</label><textarea class="input" id="notes" rows="2" ${dis}>${esc(e.notes || '')}</textarea></div>
       </div>
       <div class="panel totals" id="totals"></div>
     </div>
@@ -93,13 +93,13 @@ export async function renderCalc(el, id, projectId) {
   const lineRow = (l, i) => {
     const sum = (Number(l.qty) || 0) * (Number(l.price) || 0);
     const nameCell = l.kind === 'labor'
-      ? `<select data-i="${i}" data-k="name" ${dis}><option value="">— выбрать —</option>${refs.work_types.map((w) => `<option ${w.name === l.name ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}${l.name && !refs.work_types.some((w) => w.name === l.name) ? `<option selected>${esc(l.name)}</option>` : ''}</select>`
-      : `<input data-i="${i}" data-k="name" value="${esc(l.name)}" ${l.kind === 'material' ? 'list="mats"' : ''} placeholder="Наименование" ${dis}>`;
+      ? `<select data-i="${i}" data-k="name" aria-label="Вид работ, строка ${i + 1}" ${dis}><option value="">— выбрать —</option>${refs.work_types.map((w) => `<option ${w.name === l.name ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}${l.name && !refs.work_types.some((w) => w.name === l.name) ? `<option selected>${esc(l.name)}</option>` : ''}</select>`
+      : `<input data-i="${i}" data-k="name" aria-label="Наименование, ${l.kind === 'material' ? 'материал' : l.kind === 'labor' ? 'вид работ' : 'расход'} ${i + 1}" value="${esc(l.name)}" ${l.kind === 'material' ? 'list="mats"' : ''} placeholder="Наименование" ${dis}>`;
     return `<tr>
       <td>${nameCell}</td>
-      <td><input data-i="${i}" data-k="unit" value="${esc(l.unit || '')}" ${dis}></td>
-      <td><input data-i="${i}" data-k="qty" type="number" min="0" step="any" value="${l.qty}" ${dis}></td>
-      <td><input data-i="${i}" data-k="price" type="number" min="0" step="any" value="${l.price}" ${dis}></td>
+      <td><input data-i="${i}" data-k="unit" aria-label="Единица, ${l.kind === 'material' ? 'материал' : l.kind === 'labor' ? 'вид работ' : 'расход'} ${i + 1}" value="${esc(l.unit || '')}" ${dis}></td>
+      <td><input data-i="${i}" data-k="qty" aria-label="${l.kind === 'labor' ? 'Нормо-часы' : 'Количество'}, ${l.kind === 'material' ? 'материал' : l.kind === 'labor' ? 'вид работ' : 'расход'} ${i + 1}" type="number" min="0" step="any" value="${l.qty}" ${dis}></td>
+      <td><input data-i="${i}" data-k="price" aria-label="${l.kind === 'labor' ? 'Ставка, ₽ за час' : 'Цена, ₽'}, ${l.kind === 'material' ? 'материал' : l.kind === 'labor' ? 'вид работ' : 'расход'} ${i + 1}" type="number" min="0" step="any" value="${l.price}" ${dis}></td>
       <td class="sum" data-sum="${i}">${money(sum)}</td>
       <td>${ro ? '' : `<button class="x" data-del="${i}" title="Удалить строку" aria-label="Удалить строку">${icon('x', 16)}</button>`}</td>
     </tr>`;
@@ -126,22 +126,24 @@ export async function renderCalc(el, id, projectId) {
       <div class="tl"><span>Работы, ${t.hours} н/ч</span><span>${money(t.labor)}</span></div>
       <div class="tl"><span>Прочее</span><span>${money(t.other)}</span></div>
       <div class="tl sep"><b>Себестоимость</b><b>${money(t.cost)}</b></div>
-      <div class="tl"><span>Наценка, % <input id="markup" type="number" min="0" step="any" value="${markup}" ${dis}></span><span>${money(t.markup)}</span></div>
+      <div class="tl"><span><label for="markup">Наценка, %</label> <input id="markup" type="number" min="0" step="any" value="${markup}" ${dis}></span><span>${money(t.markup)}</span></div>
       <div class="tl"><span>Цена без НДС</span><span>${money(t.net)}</span></div>
-      <div class="tl"><span>НДС, % <input id="vat" type="number" min="0" step="any" value="${vat}" ${dis}></span><span>${money(t.vat)}</span></div>
+      <div class="tl"><span><label for="vat">НДС, %</label> <input id="vat" type="number" min="0" step="any" value="${vat}" ${dis}></span><span>${money(t.vat)}</span></div>
       <div class="tl big"><span>Цена для клиента</span><span>${money(t.total)}</span></div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px" class="no-print">
         ${ro ? '' : `<button class="btn primary" id="save">${icon('check', 16)}Сохранить расчёт</button>`}
         ${id ? `<a class="btn" href="#/calc/${id}/quote">${icon('file', 16)}ТКП для клиента</a>` : ''}
-        ${id && !ro ? `<button class="btn ghost" id="copy">${icon('copy', 16)}Копировать в новый</button><button class="linkbtn" id="del" style="align-self:flex-start;margin-top:4px">${icon('trash', 14)}Удалить расчёт</button>` : ''}
+        ${id && !ro ? `<button class="btn ghost" id="copy">${icon('copy', 16)}Копировать в новый</button>${e.project_id ? '' : `<button class="linkbtn" id="del" style="align-self:flex-start;margin-top:4px">${icon('trash', 14)}Удалить расчёт</button>`}` : ''}
       </div>`;
     bindTotals();
   };
 
   const bindTotals = () => {
     const mk = $('#markup'), vt = $('#vat');
-    mk.onchange = () => { markup = Number(mk.value) || 0; drawTotals(); };
-    vt.onchange = () => { vat = Number(vt.value) || 0; drawTotals(); };
+    // пересчёт сразу при вводе, фокус остаётся в поле
+    const live = (inp, set) => { inp.oninput = () => { set(Number(inp.value) || 0); const pos = inp.selectionStart; drawTotals(); const n = $(`#${inp.id}`); n.focus(); try { n.setSelectionRange(pos, pos); } catch { /* number input */ } }; };
+    live(mk, (v) => { markup = v; });
+    live(vt, (v) => { vat = v; });
     $('#save')?.addEventListener('click', save);
     $('#del')?.addEventListener('click', async () => {
       if (!confirm('Удалить расчёт без возможности восстановления?')) return;
@@ -150,7 +152,8 @@ export async function renderCalc(el, id, projectId) {
       location.hash = '#/calc';
     });
     $('#copy')?.addEventListener('click', async () => {
-      const ne = await api('/estimates', { method: 'POST', body: { ...collect(), title: collect().title + ' (копия)' } });
+      // копия — новый вариант без привязки к проекту, чтобы не путать с действующим расчётом
+      const ne = await api('/estimates', { method: 'POST', body: { ...collect(), project_id: null, title: collect().title + ' (копия)' } });
       toast('Создана копия');
       location.hash = `#/calc/${ne.id}`;
     });
@@ -220,6 +223,13 @@ export async function renderCalc(el, id, projectId) {
 
 export async function renderQuote(el, id) {
   const e = await api(`/estimates/${id}`);
+  const co = state.refs.settings || {};
+  // дата ТКП — дата последнего сохранения расчёта, а не «сегодня»: повторная печать даёт тот же документ
+  const qdate = (e.updated_at || e.created_at).slice(0, 10);
+  const qnum = `ТКП-${id}-${qdate.replaceAll('-', '')}`;
+  const vd = new Date(qdate + 'T00:00:00Z');
+  vd.setUTCDate(vd.getUTCDate() + Number(co.quote_valid_days || 30));
+  const validTo = vd.toISOString().slice(0, 10);
   const t = e.totals;
   const k = t.cost ? t.net / t.cost : 1; // наценка распределяется пропорционально
   let project = null;
@@ -233,8 +243,9 @@ export async function renderQuote(el, id) {
     <div class="crumbs no-print"><a href="#/calc">Калькулятор</a> / <a href="#/calc/${id}">Расчёт №${id}</a> / ТКП</div>
     <div class="topbar no-print"><div class="muted">Предпросмотр технико-коммерческого предложения. Внутренние нормо-часы и себестоимость в документ не попадают, наценка распределена по позициям.</div>
       <button class="btn primary" onclick="window.print()">${icon('printer', 16)}Печать / PDF</button></div>
+    ${co.company_name ? '' : `<div class="empty no-print" style="margin-bottom:14px;text-align:left"><b>Заполните реквизиты предприятия</b>Шапка ТКП берётся из «Справочники → Реквизиты и ТКП». ${can('refs.edit') ? '<a href="#/refs">Открыть справочник</a>' : 'Попросите директора производства или главного технолога.'}</div>`}
     <div class="doc">
-      <div class="head"><div><b style="color:var(--text)">[Наименование предприятия]</b><br>[Адрес, ИНН, контакты]</div><div style="text-align:right">№ ТКП-${id}<br>от ${dfull(state.me.today)}</div></div>
+      <div class="head"><div>${co.company_name ? `<b style="color:var(--ink)">${esc(co.company_name)}</b>` : ''}${[co.company_address, co.company_inn, [co.company_phone, co.company_email].filter(Boolean).join(' · ')].filter(Boolean).map((x) => `<br>${esc(x)}`).join('')}</div><div style="text-align:right">№ ${qnum}<br>от ${dfull(qdate)}</div></div>
       <h1>Технико-коммерческое предложение</h1>
       <div class="muted" style="margin-bottom:18px">${e.client_name ? `для ${esc(e.client_name)}` : ''}</div>
       <p><b>Предмет:</b> ${esc(e.title)}</p>
@@ -250,7 +261,9 @@ export async function renderQuote(el, id) {
         </tbody>
       </table>
       <p><b>Срок изготовления:</b> ${term}.</p>
+      ${co.payment_terms ? `<p><b>Условия оплаты:</b> ${esc(co.payment_terms)}</p>` : ''}
+      <p><b>Предложение действительно до:</b> ${dfull(validTo)}.</p>
       ${e.notes ? `<p>${esc(e.notes)}</p>` : ''}
-      <p class="muted" style="margin-top:40px">${esc(e.author_name || state.me.name)}</p>
+      <p class="muted" style="margin-top:40px">${esc(co.company_signer || e.author_name || state.me.name)}</p>
     </div>`;
 }

@@ -8,7 +8,7 @@ import { createApp } from '../src/app.js';
 import { runNotifications } from '../src/notify.js';
 import { today } from '../src/dates.js';
 
-const KEY_DB = 'pz-demo-db-v1';
+const KEY_DB = 'pz-demo-db-v2';
 const KEY_COOKIES = 'pz-demo-cookies';
 const KEY_DAY = 'pz-demo-day';
 

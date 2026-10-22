@@ -5,6 +5,7 @@ export const ROLES = {
   prod_director: 'Директор производства',
   chief_tech: 'Главный технолог',
   sales_head: 'Начальник коммерческого отдела',
+  master: 'Мастер / исполнитель',
 };
 
 // Что может каждая роль (раздел 3.4 КП)
@@ -13,6 +14,8 @@ const PERMS = {
   prod_director: ['project.create', 'project.edit', 'project.approval', 'stage.edit', 'calc.edit', 'refs.edit', 'users.edit', 'notify.run'],
   chief_tech: ['project.create', 'project.edit', 'stage.edit', 'calc.edit', 'refs.edit', 'notify.run'],
   sales_head: ['project.create', 'project.approval', 'calc.edit'],
+  // отмечает факт и пишет комментарий только по этапам, где он ответственный (проверка в PUT /stages)
+  master: [],
 };
 
 export function can(user, perm) {

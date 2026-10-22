@@ -7,6 +7,7 @@ const TABS = [
   ['materials', 'Материалы'],
   ['clients', 'Клиенты'],
   ['users', 'Пользователи'],
+  ['settings', 'Реквизиты и ТКП'],
 ];
 
 // Простые справочники: колонки [поле, заголовок, тип]
@@ -35,6 +36,7 @@ export async function renderRefs(el) {
   if (SIMPLE[tab]) return simple(pane, tab, editable);
   if (tab === 'templates') return templates(pane, editable);
   if (tab === 'users') return users(pane);
+  if (tab === 'settings') return settings(pane, editable);
 }
 
 function simple(pane, table, editable) {
@@ -42,7 +44,7 @@ function simple(pane, table, editable) {
   const rows = state.refs[table];
   const dis = editable ? '' : 'disabled';
   const rowHtml = (r) => `<tr data-id="${r.id ?? ''}">
-    ${cfg.cols.map(([f, , t]) => `<td><input class="input" style="width:100%" data-f="${f}" type="${t}" ${t === 'number' ? 'min="0" step="any"' : ''} value="${esc(r[f] ?? '')}" ${dis}></td>`).join('')}
+    ${cfg.cols.map(([f, h, t]) => `<td><input class="input" style="width:100%" data-f="${f}" aria-label="${h}${r.name ? ', ' + esc(r.name) : ''}" type="${t}" ${t === 'number' ? 'min="0" step="any"' : ''} value="${esc(r[f] ?? '')}" ${dis}></td>`).join('')}
     ${editable ? `<td style="white-space:nowrap"><button class="btn small primary" data-save>Сохранить</button> <button class="x-btn" data-del title="Удалить">${icon('trash', 14)}Удалить</button></td>` : ''}
   </tr>`;
   pane.innerHTML = `
@@ -90,8 +92,8 @@ function templates(pane, editable) {
     const total = t.stages.reduce((a, s) => a + Number(s.duration_days || 0), 0);
     return `<form class="panel tpl" data-id="${t.id ?? ''}" style="padding:18px 22px;margin-bottom:16px">
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
-        <div class="field" style="flex:1;min-width:200px"><label>Название маршрута</label><input class="input" name="name" value="${esc(t.name || '')}" ${dis}></div>
-        <div class="field" style="flex:2;min-width:240px"><label>Описание</label><input class="input" name="description" value="${esc(t.description || '')}" ${dis}></div>
+        <div class="field" style="flex:1;min-width:200px"><label>Название маршрута<input class="input" name="name" value="${esc(t.name || '')}" ${dis}></label></div>
+        <div class="field" style="flex:2;min-width:240px"><label>Описание<input class="input" name="description" value="${esc(t.description || '')}" ${dis}></label></div>
         <div class="muted" style="padding-bottom:9px">${t.stages.length} этапов · ${total} дн.</div>
       </div>
       <table class="lines" style="min-width:480px">
@@ -154,10 +156,10 @@ function stageRow(s, i, editable) {
   const dis = editable ? '' : 'disabled';
   return `<tr>
     <td class="muted num">${i + 1}</td>
-    <td><input data-f="name" value="${esc(s.name)}" ${dis}></td>
-    <td><input data-f="duration_days" type="number" min="0" step="1" value="${s.duration_days}" ${dis}></td>
-    <td style="text-align:center"><input data-f="is_test" type="checkbox" style="width:auto" ${s.is_test ? 'checked' : ''} ${dis}></td>
-    ${editable ? `<td style="white-space:nowrap"><button type="button" class="x" data-up title="Выше">↑</button><button type="button" class="x" data-down title="Ниже">↓</button><button type="button" class="x" data-rm title="Удалить этап">×</button></td>` : ''}
+    <td><input data-f="name" aria-label="Название этапа ${i + 1}" value="${esc(s.name)}" ${dis}></td>
+    <td><input data-f="duration_days" aria-label="Длительность этапа ${i + 1}, дней" type="number" min="0" step="1" value="${s.duration_days}" ${dis}></td>
+    <td style="text-align:center"><input data-f="is_test" aria-label="Этап ${i + 1} — испытания" type="checkbox" style="width:auto" ${s.is_test ? 'checked' : ''} ${dis}></td>
+    ${editable ? `<td style="white-space:nowrap"><span class="row-tools"><button type="button" class="x" data-up aria-label="Этап ${i + 1} выше" title="Выше">${icon('up', 16)}</button><button type="button" class="x" data-down aria-label="Этап ${i + 1} ниже" title="Ниже">${icon('down', 16)}</button><button type="button" class="x" data-rm aria-label="Удалить этап ${i + 1}" title="Удалить этап">${icon('x', 16)}</button></span></td>` : ''}
   </tr>`;
 }
 
@@ -167,9 +169,9 @@ function users(pane) {
   const roleSel = (r, dis) => `<select class="input" data-f="role" ${dis}>${Object.entries(roles).map(([k, v]) => `<option value="${k}" ${k === r ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>`;
   const dis = editable ? '' : 'disabled';
   const rowHtml = (u) => `<tr data-id="${u.id ?? ''}">
-    <td>${u.id ? `<b>${esc(u.login)}</b>` : `<input class="input" data-f="login" placeholder="логин">`}</td>
-    <td><input class="input" data-f="name" value="${esc(u.name || '')}" ${dis}></td>
-    <td><input class="input" data-f="email" value="${esc(u.email || '')}" ${dis}></td>
+    <td>${u.id ? `<b>${esc(u.login)}</b>` : `<input class="input" data-f="login" aria-label="Логин нового пользователя" placeholder="логин">`}</td>
+    <td><input class="input" data-f="name" aria-label="ФИО${u.login ? ', ' + esc(u.login) : ''}" value="${esc(u.name || '')}" ${dis}></td>
+    <td><input class="input" data-f="email" aria-label="E-mail${u.login ? ', ' + esc(u.login) : ''}" value="${esc(u.email || '')}" ${dis}></td>
     <td>${roleSel(u.role, dis)}</td>
     <td style="text-align:center"><input type="checkbox" data-f="active" ${u.active !== 0 ? 'checked' : ''} ${dis}></td>
     ${editable ? `<td><input class="input" data-f="password" type="password" autocomplete="new-password" placeholder="${u.id ? 'новый пароль' : 'пароль'}"></td>
@@ -201,3 +203,33 @@ function users(pane) {
   });
 }
 
+
+// Реквизиты предприятия для шапки ТКП, НДС по умолчанию, срок действия и условия оплаты
+function settings(pane, editable) {
+  const st = state.refs.settings || {};
+  const dis = editable ? '' : 'disabled';
+  const F = [
+    ['company_name', 'Наименование предприятия', 'ООО «…»'],
+    ['company_address', 'Адрес', 'Город, улица, дом'],
+    ['company_inn', 'ИНН / КПП', 'ИНН 0000000000 / КПП 000000000'],
+    ['company_phone', 'Телефон', '+7 …'],
+    ['company_email', 'E-mail для ТКП', 'sales@…'],
+    ['company_signer', 'Подпись в ТКП', 'Должность, Фамилия И. О.'],
+  ];
+  pane.innerHTML = `
+    <p class="muted">Эти данные попадают в шапку и подвал ТКП для клиента. Дата ТКП — дата последнего сохранения расчёта, поэтому повторная печать даёт тот же документ.</p>
+    <form class="panel form-panel" id="setf" style="max-width:860px">
+      ${F.map(([k, l, ph]) => `<div class="field ${k === 'company_name' || k === 'company_address' ? 'wide' : ''}"><label for="st-${k}">${l}</label><input class="input" id="st-${k}" name="${k}" value="${esc(st[k] || '')}" placeholder="${ph}" ${dis}></div>`).join('')}
+      <div class="field"><label for="st-vat">НДС по умолчанию, %</label><input class="input" id="st-vat" name="vat_pct" type="number" min="0" max="50" step="any" value="${esc(st.vat_pct || '22')}" ${dis}><small>С 01.01.2026 основная ставка — 22%. Уже сохранённые расчёты не меняются.</small></div>
+      <div class="field"><label for="st-valid">Срок действия ТКП, дней</label><input class="input" id="st-valid" name="quote_valid_days" type="number" min="1" step="1" value="${esc(st.quote_valid_days || '30')}" ${dis}></div>
+      <div class="field wide"><label for="st-pay">Условия оплаты</label><textarea class="input" id="st-pay" name="payment_terms" rows="2" ${dis}>${esc(st.payment_terms || '')}</textarea></div>
+      ${editable ? `<div class="wide actions"><button class="btn primary" type="submit">${icon('check', 16)}Сохранить реквизиты</button></div>` : ''}
+    </form>`;
+  pane.querySelector('#setf').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      state.refs.settings = await api('/settings', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) });
+      toast('Реквизиты сохранены');
+    } catch (err) { toast(err.message, true); }
+  };
+}

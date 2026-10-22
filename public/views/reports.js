@@ -1,11 +1,15 @@
-import { state, api, esc, dm, dfull, diffDays, plural, badge, routeStrip } from '../lib.js';
+import { state, api, esc, dm, dfull, diffDays, plural, badge, routeStrip, money } from '../lib.js';
 import { icon } from '../icons.js';
 
 // Сводка для руководителя: сколько в работе, где узкие места, какие сроки под угрозой, что впереди
 export async function renderReports(el) {
   const all = await api('/projects');
   const today = state.me.today;
-  const active = all.filter((p) => p.status.code !== 'done' && !['done', 'cancelled'].includes(p.approval_status));
+  const active = all.filter((p) => p.in_production && p.status.code !== 'done');
+  // сумма под угрозой: последние расчёты (без НДС) проектов с просрочкой или прогнозом позже срока
+  const atRisk = active.filter((p) => p.status.code === 'overdue' || p.forecast_slip > 0);
+  const riskSum = atRisk.reduce((a, p) => a + (p.amount_net || 0), 0);
+  const noAmount = atRisk.filter((p) => !p.amount_net).length;
   const overdue = active.filter((p) => p.status.code === 'overdue');
   const attention = active.filter((p) => p.status.code === 'attention');
   const finished = all.filter((p) => p.status.code === 'done' || p.approval_status === 'done');
@@ -46,7 +50,7 @@ export async function renderReports(el) {
     .filter((x) => x.left <= 30)
     .sort((a, b) => a.left - b.left);
 
-  const risk = [...overdue, ...attention];
+  const risk = [...overdue, ...attention, ...active.filter((p) => p.status.code === 'ok' && p.forecast_slip > 0)];
   el.innerHTML = `
     <div class="topbar"><div><h1>Отчёты</h1><div class="sub">Сводка на ${dfull(today)}. Без сложных графиков — только то, что нужно каждый день</div></div>
       <button class="btn no-print" onclick="window.print()">${icon('printer', 16)}Печать</button></div>
@@ -56,12 +60,13 @@ export async function renderReports(el) {
       <div><span class="magnet attention lg"></span><b>${attention.length}</b><span>срок сегодня<br>или завтра</span></div>
       <div><span class="magnet ok lg"></span><b>${active.length - overdue.length - attention.length}</b><span>идут в срок</span></div>
       <div><b>${finished.length}</b><span>завершено</span></div>
+      <div><b style="font-size:20px">${money(riskSum)}</b><span>сумма под угрозой${noAmount ? `<br><span class="faint">ещё ${noAmount} без расчёта</span>` : ''}</span></div>
     </div>
     <div class="rep-grid">
       <div class="panel"><h2>Сроки под угрозой</h2>
         ${risk.length ? risk.map((p) => `
           <div class="rep-row"><div><a href="#/projects/${p.id}"><b>${esc(p.code)}</b> · ${esc(p.title)}</a> <span class="faint">${esc(p.client_name || '')}</span>
-            <div class="sub">${p.current_stage ? `Этап ${p.status.current_pos}/${p.status.total}: ${esc(p.current_stage.name)} · план ${dm(p.current_stage.plan_date)}` : ''}</div>
+            <div class="sub">${p.current_stage ? `Этап ${p.status.current_pos}/${p.status.total}: ${esc(p.current_stage.name)} · план ${dm(p.current_stage.plan_date)}` : ''}${p.forecast_slip > 0 ? ` · <span class="bad-text">прогноз сдачи ${dm(p.forecast_due)} (+${p.forecast_slip} дн.)</span>` : ''}</div>
             <div style="margin-top:8px">${routeStrip(p, today)}</div>
             ${commentOf(p)}</div>
           <div>${badge(p.status)}</div></div>`).join('') : '<p class="muted">Все проекты идут в срок</p>'}

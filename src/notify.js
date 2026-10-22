@@ -12,7 +12,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 // Собирает события на дату today. Каждое событие отправляется получателю один раз (dedup_key).
 export function collectEvents(db, today) {
   const projects = db.prepare(`SELECT p.*, c.name AS client_name FROM projects p LEFT JOIN clients c ON c.id = p.client_id
-    WHERE p.approval_status NOT IN ('done','cancelled')`).all();
+    WHERE p.approval_status IN ('approved','in_work')`).all();
   const stagesQ = db.prepare(`SELECT s.*, u.name AS responsible_name FROM project_stages s
     LEFT JOIN users u ON u.id = s.responsible_id WHERE s.project_id = ? ORDER BY s.pos`);
   const events = [];

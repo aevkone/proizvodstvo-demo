@@ -55,6 +55,39 @@ export function projectStatus(project, stages, today) {
   return { ...base, code: 'ok', days: 0, label: 'В срок' };
 }
 
+// Прогноз окончания этапов без изменения плана: незавершённый этап не может закончиться
+// раньше своего плана и раньше, чем «прогноз предыдущего + его плановая длительность».
+// Просроченный текущий этап в лучшем случае закончится завтра.
+export function forecast(project, stages, today) {
+  let prevPlan = project.start_date || stages[0]?.plan_date;
+  let prevEnd = prevPlan;
+  let currentSeen = false;
+  const dates = stages.map((s) => {
+    const dur = Math.max(0, prevPlan ? diffDays(s.plan_date, prevPlan) : 0);
+    prevPlan = s.plan_date;
+    let end;
+    if (s.fact_date) end = s.fact_date;
+    else {
+      end = s.plan_date;
+      if (prevEnd && diffDays(addDaysStr(prevEnd, dur), end) > 0) end = addDaysStr(prevEnd, dur);
+      if (!currentSeen && diffDays(today, end) >= 0 && diffDays(today, s.plan_date) > 0) end = addDaysStr(today, 1);
+      currentSeen = true;
+    }
+    prevEnd = end;
+    return end;
+  });
+  const last = dates[dates.length - 1] || null;
+  const target = project.due_date || stages[stages.length - 1]?.plan_date || null;
+  const slip = last && target ? diffDays(last, target) : 0;
+  return { dates, due: last, slip: Math.max(0, slip) };
+}
+
+function addDaysStr(s, n) {
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().slice(0, 10);
+}
+
 export function plural(n, one, few, many) {
   const m10 = n % 10, m100 = n % 100;
   const w = m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;

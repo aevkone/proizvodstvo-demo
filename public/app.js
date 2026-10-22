@@ -8,6 +8,9 @@ import { renderCalcList, renderCalc, renderQuote } from './views/calc.js';
 import { renderNotifications } from './views/notifications.js';
 import { renderRefs } from './views/refs.js';
 import { renderReports } from './views/reports.js';
+import { startTour, isTourActive } from './tour.js';
+
+window.startTour = startTour;
 
 const NAV = [
   ['#/projects', 'Проекты', 'board'],
@@ -54,6 +57,7 @@ function shell() {
   const hash = location.hash || '#/projects';
   const me = state.me;
   app.innerHTML = `
+    <a class="skip-link" href="#view" id="skip">К содержимому</a>
     <div class="layout">
       <aside class="side">
         <a class="brand" href="#/projects" aria-label="На доску проектов">
@@ -81,6 +85,7 @@ function shell() {
     location.hash = '#/login';
   };
   document.getElementById('tourbtn').onclick = () => window.startTour?.(true);
+  document.getElementById('skip').onclick = (e) => { e.preventDefault(); document.getElementById('view').focus(); };
   document.getElementById('demoreset')?.addEventListener('click', () => {
     if (!confirm('Вернуть демо-данные к исходным? Ваши изменения пропадут.')) return;
     window.__demo.reset();
@@ -89,7 +94,7 @@ function shell() {
   });
   // счётчик просрочек на пункте «Проекты»
   api('/projects').then((ps) => {
-    const n = ps.filter((p) => p.status.code === 'overdue').length;
+    const n = ps.filter((p) => p.in_production && p.status.code === 'overdue').length;
     const el = document.getElementById('navcount');
     if (el && n) { el.textContent = n; el.hidden = false; el.title = `Проектов с просрочкой: ${n}`; }
   }).catch(() => {});
@@ -136,8 +141,7 @@ async function route() {
         view.innerHTML = `<div class="empty"><b>Не получилось открыть раздел</b>${esc(e.message)}<br><br><a class="btn" href="#/projects">К доске проектов</a></div>`;
         if (e.status !== 401) toast(e.message, true);
       }
-      window.scrollTo(0, 0);
-      window.onRouteRendered?.(hash);
+      if (!isTourActive()) { window.scrollTo(0, 0); setTimeout(() => startTour(false), 400); }
       return;
     }
   }

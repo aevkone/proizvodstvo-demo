@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stageStatus, needsComment, projectStatus, plural } from '../src/status.js';
+import { stageStatus, needsComment, projectStatus, plural, forecast } from '../src/status.js';
 
 const T = '2026-10-22';
 
@@ -43,4 +43,21 @@ test('склонение', () => {
   assert.equal(plural(3, 'день', 'дня', 'дней'), '3 дня');
   assert.equal(plural(11, 'день', 'дня', 'дней'), '11 дней');
   assert.equal(plural(22, 'день', 'дня', 'дней'), '22 дня');
+});
+
+test('прогноз сдачи: в срок = план, просрочка текущего сдвигает хвост', () => {
+  const st = [
+    { plan_date: '2026-10-15', fact_date: '2026-10-15' },
+    { plan_date: '2026-10-25' },
+    { plan_date: '2026-10-30' },
+  ];
+  const ok = forecast({ start_date: '2026-10-10', due_date: '2026-10-30' }, st, T);
+  assert.equal(ok.due, '2026-10-30');
+  assert.equal(ok.slip, 0);
+  const late = forecast({ start_date: '2026-10-10', due_date: '2026-10-30' }, [st[0], { plan_date: '2026-10-20' }, { plan_date: '2026-10-25' }], T);
+  assert.deepEqual(late.dates, ['2026-10-15', '2026-10-23', '2026-10-28']);
+  const late2 = forecast({ start_date: '2026-10-10', due_date: '2026-10-25' }, [st[0], { plan_date: '2026-10-20' }, { plan_date: '2026-10-25' }], T);
+  assert.equal(late2.slip, 3);
+  const lateFact = forecast({ start_date: '2026-10-10', due_date: '2026-10-30' }, [{ plan_date: '2026-10-15', fact_date: '2026-10-19' }, { plan_date: '2026-10-28' }, { plan_date: '2026-10-30' }], T);
+  assert.equal(lateFact.dates[1], '2026-11-01', 'опоздание факта сдвигает следующий этап на ту же длительность');
 });

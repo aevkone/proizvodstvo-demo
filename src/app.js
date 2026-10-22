@@ -7,7 +7,22 @@ import { today as getToday, isDate } from './dates.js';
 import { runNotifications } from './notify.js';
 import { registerRefs } from './refs.js';
 import { listEstimates, getEstimate, validateEstimate, saveEstimate } from './estimates.js';
-import { APPROVAL, createProject, loadProject, listProjects, updateStages, addReworkCycle } from './projects.js';
+import { APPROVAL, createProject, loadProject, listProjects, updateStages, addReworkCycle, deleteProject } from './projects.js';
+import { getSetting } from './db.js';
+
+// Настройки ТКП и реквизиты предприятия (справочник «Реквизиты и ТКП»)
+export const SETTINGS_KEYS = ['company_name', 'company_address', 'company_inn', 'company_phone', 'company_email', 'company_signer', 'vat_pct', 'quote_valid_days', 'payment_terms'];
+const SETTINGS_DEFAULTS = { vat_pct: '22', quote_valid_days: '30', payment_terms: '' };
+
+// Ограничение перебора паролей: 5 неудачных попыток на логин+IP за 15 минут
+const FAILS = new Map();
+const FAIL_WINDOW = 15 * 60 * 1000;
+function tooMany(key) {
+  const now = Date.now();
+  const list = (FAILS.get(key) || []).filter((t) => now - t < FAIL_WINDOW);
+  FAILS.set(key, list);
+  return list.length >= 5;
+}
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -22,10 +37,18 @@ export function createApp(db, opts = {}) {
   // --- Авторизация ---
   app.post('/api/login', (req, res) => {
     const { login, password } = req.body || {};
-    const u = db.prepare('SELECT * FROM users WHERE login = ? AND active = 1').get(String(login || '').trim().toLowerCase());
-    if (!u || !verifyPassword(String(password || ''), u.pass_hash)) return res.status(401).json({ error: 'Неверный логин или пароль' });
+    const lg = String(login || '').trim().toLowerCase();
+    const key = `${lg}|${req.ip || ''}`;
+    if (tooMany(key)) return res.status(429).json({ error: 'Слишком много неудачных попыток. Попробуйте через 15 минут.' });
+    const u = db.prepare('SELECT * FROM users WHERE login = ? AND active = 1').get(lg);
+    if (!u || !verifyPassword(String(password || ''), u.pass_hash)) {
+      FAILS.get(key).push(Date.now());
+      return res.status(401).json({ error: 'Неверный логин или пароль' });
+    }
+    FAILS.delete(key);
     const token = createSession(db, u.id);
-    res.cookie('sid', token, { httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 24 * 14 });
+    const secure = process.env.NODE_ENV === 'production' || String(process.env.APP_URL || '').startsWith('https');
+    res.cookie('sid', token, { httpOnly: true, sameSite: 'lax', secure, maxAge: 1000 * 60 * 60 * 24 * 14 });
     res.json({ ok: true });
   });
 
@@ -52,7 +75,17 @@ export function createApp(db, opts = {}) {
       templates: templates.map((t) => ({ ...t, stages: tstages.filter((s) => s.template_id === t.id) })),
       work_types: db.prepare('SELECT * FROM work_types ORDER BY id').all(),
       materials: db.prepare('SELECT * FROM materials ORDER BY id').all(),
+      settings: Object.fromEntries(SETTINGS_KEYS.map((k) => [k, getSetting(db, k, SETTINGS_DEFAULTS[k] ?? '')])),
     });
+  });
+
+  app.put('/api/settings', requirePerm('refs.edit'), (req, res) => {
+    const b = req.body || {};
+    if (b.vat_pct !== undefined && !(Number(b.vat_pct) >= 0 && Number(b.vat_pct) <= 50)) return res.status(400).json({ error: 'НДС — число от 0 до 50' });
+    if (b.quote_valid_days !== undefined && !(Number.isInteger(Number(b.quote_valid_days)) && Number(b.quote_valid_days) > 0)) return res.status(400).json({ error: 'Срок действия ТКП — целое число дней' });
+    const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    for (const k of SETTINGS_KEYS) if (k in b) up.run(k, String(b[k] ?? '').trim());
+    res.json(Object.fromEntries(SETTINGS_KEYS.map((k) => [k, getSetting(db, k, SETTINGS_DEFAULTS[k] ?? '')])));
   });
 
   // --- Проекты ---
@@ -113,7 +146,11 @@ export function createApp(db, opts = {}) {
   });
 
   app.delete('/api/projects/:id', requirePerm('users.edit'), (req, res) => {
-    db.prepare('DELETE FROM projects WHERE id = ?').run(Number(req.params.id));
+    try {
+      deleteProject(db, Number(req.params.id));
+    } catch (e) {
+      return res.status(e.status || 500).json({ error: e.message });
+    }
     res.json({ ok: true });
   });
 
@@ -127,7 +164,7 @@ export function createApp(db, opts = {}) {
     if (!can(req.user, 'stage.edit')) {
       // Ответственный за этап может отмечать факт и комментарий по своим этапам
       const own = db.prepare('SELECT responsible_id FROM project_stages WHERE id = ? AND project_id = ?');
-      const allowed = updates.every((u) => own.get(u.id, id)?.responsible_id === req.user.id && u.plan_date === undefined && u.responsible_id === undefined);
+      const allowed = updates.every((u) => own.get(u.id, id)?.responsible_id === req.user.id && u.plan_date === undefined && u.responsible_id === undefined && u.name === undefined);
       if (!allowed) return res.status(403).json({ error: 'Недостаточно прав для изменения этапов' });
     }
     try {
@@ -143,9 +180,9 @@ export function createApp(db, opts = {}) {
   app.post('/api/projects/:id/rework', requirePerm('stage.edit'), (req, res) => {
     const id = Number(req.params.id);
     try {
-      addReworkCycle(db, id);
+      addReworkCycle(db, id, { result: req.body?.result, userId: req.user.id });
     } catch (e) {
-      return res.status(400).json({ error: e.message });
+      return res.status(e.status || 400).json({ error: e.message });
     }
     res.json(loadProject(db, id, today()));
   });
@@ -176,6 +213,8 @@ export function createApp(db, opts = {}) {
   });
 
   app.delete('/api/estimates/:id', requirePerm('calc.edit'), (req, res) => {
+    const e = db.prepare('SELECT project_id FROM estimates WHERE id = ?').get(Number(req.params.id));
+    if (e?.project_id) return res.status(409).json({ error: 'Расчёт привязан к проекту — его нельзя удалить. Сделайте копию и правьте её.' });
     db.prepare('DELETE FROM estimates WHERE id = ?').run(Number(req.params.id));
     res.json({ ok: true });
   });

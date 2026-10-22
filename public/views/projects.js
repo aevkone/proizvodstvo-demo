@@ -7,11 +7,14 @@ let query = '';
 export async function renderProjects(el) {
   const all = await api('/projects');
   const today = state.me.today;
-  const active = all.filter((p) => p.status.code !== 'done' && !['done', 'cancelled'].includes(p.approval_status));
+  const active = all.filter((p) => p.in_production && p.status.code !== 'done');
+  const requests = all.filter((p) => ['request', 'quote_sent'].includes(p.approval_status));
+  const mine = active.filter((p) => p.stages.some((s) => !s.fact_date && s.responsible_id === state.me.id));
   const overdue = active.filter((p) => p.status.code === 'overdue');
   const attention = active.filter((p) => p.status.code === 'attention');
   const ok = active.filter((p) => p.status.code === 'ok');
-  const sets = { active, overdue, attention, ok, all };
+  const sets = { active, overdue, attention, ok, all, requests, mine };
+  if (!sets[filter]) filter = 'active';
 
   el.innerHTML = `
     <div class="topbar">
@@ -26,6 +29,8 @@ export async function renderProjects(el) {
       <button class="chip" data-f="overdue"><span class="magnet overdue"></span><b>${overdue.length}</b> с просрочкой</button>
       <button class="chip" data-f="attention"><span class="magnet attention"></span><b>${attention.length}</b> срок сегодня / завтра</button>
       <button class="chip" data-f="ok"><span class="magnet ok"></span><b>${ok.length}</b> в срок</button>
+      <button class="chip" data-f="mine" title="Проекты, где на мне есть незакрытые этапы">${icon('user', 15)}<b>${mine.length}</b> мои</button>
+      <button class="chip" data-f="requests" title="Заявки и отправленные ТКП — ещё не в производстве">${icon('file', 15)}<b>${requests.length}</b> заявки</button>
       <button class="chip" data-f="all">Все, с завершёнными</button>
     </div>
     <div class="board">
@@ -61,6 +66,8 @@ function emptyState(q) {
   if (q) return `<div class="empty"><b>Ничего не нашлось</b>Проверьте номер заказа или название клиента.</div>`;
   if (filter === 'overdue') return `<div class="empty"><b>Просрочек нет</b>Все текущие этапы укладываются в план.</div>`;
   if (filter === 'attention') return `<div class="empty"><b>Ближайшие два дня спокойные</b>Сроков на сегодня и завтра нет.</div>`;
+  if (filter === 'mine') return `<div class="empty"><b>На вас сейчас нет открытых этапов</b>Здесь появятся проекты, где вы ответственный за этап.</div>`;
+  if (filter === 'requests') return `<div class="empty"><b>Заявок нет</b>Заявки и отправленные ТКП живут здесь, пока заказчик не согласует — писем о просрочке по ним не бывает.</div>`;
   return `<div class="empty"><b>На доске пока пусто</b>${can('project.create') ? 'Создайте первый проект — этапы подставятся из типового маршрута.<br><br><a class="btn primary" href="#/new">Новый проект</a>' : 'Проекты появятся, когда их заведёт коммерческий отдел.'}</div>`;
 }
 
@@ -76,7 +83,9 @@ function card(p, today) {
     : `<span>${s.total ? 'Все этапы выполнены' : 'Этапы не заданы'}</span>`;
   const approval = p.approval_status !== 'in_work' ? `<span class="tag">${esc(p.approval_label)}</span>` : '';
   const due = p.due_date ? diffDays(p.due_date, today) : null;
-  const dueTxt = due === null ? '' : due < 0 ? `сдача просрочена на ${plural(-due, 'день', 'дня', 'дней')}` : due === 0 ? 'сдача сегодня' : `сдача ${dm(p.due_date)} · через ${plural(due, 'день', 'дня', 'дней')}`;
+  let dueTxt = due === null ? '' : due < 0 ? `сдача просрочена на ${plural(-due, 'день', 'дня', 'дней')}` : due === 0 ? 'сдача сегодня' : `сдача ${dm(p.due_date)} · через ${plural(due, 'день', 'дня', 'дней')}`;
+  if (p.forecast_slip > 0 && due !== null && due >= 0) dueTxt = `<span class="bad-text">прогноз сдачи ${dm(p.forecast_due)} · +${p.forecast_slip} дн. к сроку</span>`;
+  if (!p.in_production) dueTxt = 'не в производстве';
   return `
     <a class="card is-${esc(s.code)}" href="#/projects/${p.id}">
       <div class="head"><span class="code-tag">${esc(p.code)}</span>${badge(s)}</div>

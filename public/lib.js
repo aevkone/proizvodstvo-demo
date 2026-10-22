@@ -48,6 +48,8 @@ export async function api(path, opts = {}) {
 let toastTimer;
 export function toast(msg, bad = false) {
   const el = document.getElementById('toast');
+  // ошибки объявляются экранным диктором сразу (alert), остальное — вежливо (status)
+  el.setAttribute('role', bad ? 'alert' : 'status');
   el.textContent = msg;
   el.className = 'show' + (bad ? ' bad' : '');
   clearTimeout(toastTimer);

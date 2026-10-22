@@ -31,8 +31,10 @@ test('без входа — 401, неверный пароль — 401', async (
 
 test('главный экран: 8 проектов, 2 требуют внимания, 6 в срок', async () => {
   const api = await login('ceo');
-  const ps = await (await api('/api/projects')).json();
+  const all = await (await api('/api/projects')).json();
+  const ps = all.filter((p) => p.in_production);
   assert.equal(ps.length, 8);
+  assert.equal(all.find((p) => p.code === '9Д').in_production, false, 'заявка не в производстве');
   const by = (c) => ps.filter((p) => p.status.code === c).length;
   assert.equal(by('ok'), 6);
   assert.equal(by('overdue') + by('attention'), 2);
@@ -68,27 +70,37 @@ test('просроченный этап нельзя сохранить без �
   const p4 = ps.find((p) => p.code === '4Д');
   const st = p4.stages[0];
   // сдвигаем план в прошлое без комментария
-  let r = await api(`/api/projects/${p4.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: st.id, plan_date: '2026-10-20' }] }) });
-  assert.equal(r.status, 422);
+  let r = await api(`/api/projects/${p4.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: st.id, plan_date: '2026-10-20', reason: 'ошибка ввода' }] }) });
+  assert.equal(r.status, 422, 'просрочка без комментария');
   r = await api(`/api/projects/${p4.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: st.id, plan_date: '2026-10-20', comment: 'Ждём металл' }] }) });
+  assert.equal(r.status, 422, 'перенос плана без причины');
+  r = await api(`/api/projects/${p4.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: st.id, plan_date: '2026-10-20', comment: 'Ждём металл', reason: 'Уточнили срок поставки' }] }) });
   assert.equal(r.status, 200);
   const p = await r.json();
   assert.equal(p.stages[0].status.code, 'overdue');
-  assert.equal(p.stages[0].comments.length, 1);
+  assert.equal(p.stages[0].baseline_plan_date, st.plan_date, 'базовый план сохранён');
+  assert.equal(p.stages[0].moved_days, -4);
+  assert.equal(p.stages[0].changes[0].reason, 'Уточнили срок поставки');
+  assert.equal(p.stages[0].changes[0].old_value, st.plan_date);
 });
 
 test('цикл доработки вставляется после испытаний и сдвигает срок', async () => {
   const api = await login('prod');
   const ps = await (await api('/api/projects')).json();
   const p = ps.find((x) => x.code === '6Д');
-  const r = await api(`/api/projects/${p.id}/rework`, { method: 'POST' });
+  assert.equal((await api(`/api/projects/${p.id}/rework`, { method: 'POST', body: '{}' })).status, 400, 'без результата испытаний');
+  const r = await api(`/api/projects/${p.id}/rework`, { method: 'POST', body: JSON.stringify({ result: 'Заусенец на вырубке, подогнать зазор' }) });
   assert.equal(r.status, 200);
   const q = await r.json();
-  assert.equal(q.stages.length, 16);
+  assert.equal(q.stages.length, 15);
   const names = q.stages.map((s) => s.name);
+  assert.ok(!names.includes('Доработка по итогам испытаний'), 'нет дубля в шаблоне');
   const i = names.indexOf('Испытания на прессе');
-  assert.deepEqual(names.slice(i + 1, i + 5), ['Разборка', 'Подгонка', 'Повторная сборка', 'Повторные испытания']);
-  assert.ok(q.due_date > p.due_date);
+  assert.deepEqual(names.slice(i + 1, i + 5), ['Разборка (итерация 2)', 'Подгонка (итерация 2)', 'Повторная сборка (итерация 2)', 'Повторные испытания (итерация 2)']);
+  assert.equal(q.due_date, p.due_date, 'договорной срок не меняется');
+  assert.ok(q.forecast_slip > 0, 'прогноз показывает отставание');
+  const q2 = await (await api(`/api/projects/${p.id}/rework`, { method: 'POST', body: JSON.stringify({ result: 'ещё раз' }) })).json();
+  assert.ok(q2.stages.some((s) => s.name === 'Подгонка (итерация 3)'));
 });
 
 test('статус согласования меняет коммерческий отдел, технолог — нет', async () => {
@@ -98,4 +110,43 @@ test('статус согласования меняет коммерчески�
   const r = await sales('/api/projects/8', { method: 'PATCH', body: JSON.stringify({ approval_status: 'in_work' }) });
   assert.equal(r.status, 200);
   assert.equal((await r.json()).approval_label, 'В работе');
+});
+
+test('факт в будущем не принимается; проект с фактами нельзя удалить', async () => {
+  const api = await login('prod');
+  const p = (await (await api('/api/projects')).json()).find((x) => x.code === '1Д');
+  const r = await api(`/api/projects/${p.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: p.current_stage.id, fact_date: '2026-10-25' }] }) });
+  assert.equal(r.status, 422);
+  assert.equal((await api(`/api/projects/${p.id}`, { method: 'DELETE' })).status, 409);
+});
+
+test('мастер отмечает факт своего этапа, но не меняет план', async () => {
+  const api = await login('master2');
+  const p = (await (await api('/api/projects')).json()).find((x) => x.code === '3Д');
+  assert.equal(p.current_stage.responsible_name, 'Николай Сергеевич Рябов');
+  let r = await api(`/api/projects/${p.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: p.current_stage.id, plan_date: '2026-10-30', reason: 'x' }] }) });
+  assert.equal(r.status, 403);
+  r = await api(`/api/projects/${p.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: p.current_stage.id, fact_date: TODAY }] }) });
+  assert.equal(r.status, 200);
+  const other = (await (await api('/api/projects')).json()).find((x) => x.code === '2Д');
+  r = await api(`/api/projects/${other.id}/stages`, { method: 'PUT', body: JSON.stringify({ stages: [{ id: other.current_stage.id, fact_date: TODAY, comment: 'x' }] }) });
+  assert.equal(r.status, 403, 'чужой этап');
+});
+
+test('реквизиты ТКП и НДС 22% по умолчанию', async () => {
+  const sales = await login('sales');
+  const refs = await (await sales('/api/refs')).json();
+  assert.equal(refs.settings.vat_pct, '22');
+  assert.ok(refs.settings.company_name);
+  assert.equal((await sales('/api/settings', { method: 'PUT', body: JSON.stringify({ vat_pct: 20 }) })).status, 403);
+  const e = await (await sales('/api/estimates', { method: 'POST', body: JSON.stringify({ title: 'T', lines: [{ kind: 'labor', name: 'x', qty: 1, price: 100 }], markup_pct: 0 }) })).json();
+  assert.equal(e.vat_pct, 22);
+  assert.equal(e.totals.total, 122);
+  assert.ok(e.updated_at);
+});
+
+test('после 5 неверных паролей вход блокируется', async () => {
+  const bad = () => fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login: 'ceo', password: 'nope' }) });
+  for (let i = 0; i < 5; i++) assert.equal((await bad()).status, 401);
+  assert.equal((await bad()).status, 429);
 });
