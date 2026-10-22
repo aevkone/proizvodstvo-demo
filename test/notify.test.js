@@ -32,7 +32,7 @@ test('рассылка в outbox без повторов; переход на с
     const files = readdirSync(outbox);
     assert.equal(files.filter((f) => f.endsWith('.eml')).length, 6);
     const html = readFileSync(join(outbox, files.find((f) => f.includes('overdue') && f.endsWith('.html'))), 'utf8');
-    assert.match(html, /Просрочка этапа — проект «2Д\. Компания Б — вырубной штамп»/);
+    assert.match(html, /Просрочка этапа — проект «2Д\. Компания Б — пресс-форма корпуса»/);
     assert.match(html, /Комментарий ответственного: Поставка стали Х12МФ/);
     assert.match(html, /Открыть проект в системе/);
 

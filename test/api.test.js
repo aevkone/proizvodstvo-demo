@@ -41,7 +41,8 @@ test('главный экран: 8 проектов, 2 требуют внима
   const p2 = ps.find((p) => p.code === '2Д');
   assert.equal(p2.status.label, 'Просрочка 2 дня');
   assert.equal(p2.status.current_pos, 3);
-  assert.equal(p2.current_stage.name, 'Черновое фрезерование деталей блока');
+  assert.equal(p2.current_stage.name, 'Черновая обработка плит и вставок');
+  assert.equal(p2.title, 'пресс-форма корпуса');
 });
 
 test('ген.директор только смотрит', async () => {

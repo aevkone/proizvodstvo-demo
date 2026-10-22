@@ -81,10 +81,10 @@ const MATERIALS = [
 // [код, клиент, изделие, шаблон, выполнено этапов, смещение плана текущего этапа от сегодня, согласование]
 const PROJECTS = [
   ['1Д', 'Компания А', 'вставка пресс-формы', 'Пресс-форма', 5, 2, 'in_work'],
-  ['2Д', 'Компания Б', 'вырубной штамп', 'Штамп', 2, -2, 'in_work'],
+  ['2Д', 'Компания Б', 'пресс-форма корпуса', 'Пресс-форма', 2, -2, 'in_work'],
   ['3Д', 'Компания В', 'пуансон', 'Простая деталь', 3, 0, 'in_work'],
   ['4Д', 'Компания Г', 'формообразующая вставка', 'Простая деталь', 0, 2, 'in_work'],
-  ['5Д', 'Компания А', 'пресс-форма корпуса', 'Пресс-форма', 8, 3, 'in_work'],
+  ['5Д', 'Компания А', 'пресс-форма колпачка', 'Пресс-форма', 8, 3, 'in_work'],
   ['6Д', 'Компания Д', 'вытяжной штамп', 'Штамп', 4, 4, 'in_work'],
   ['7Д', 'Компания Б', 'матрица', 'Простая деталь', 1, 2, 'in_work'],
   ['8Д', 'Компания Е', 'пресс-форма крышки', 'Пресс-форма', 0, 5, 'approved'],
@@ -132,7 +132,7 @@ export function seed(db, { today = getToday() } = {}) {
     stages.slice(0, doneCount).forEach((s) => done.run(s.plan_date, null, s.id));
   }
 
-  // Сценарий из макета КП: 2Д — поставка сдвинулась на 2 дня, черновое фрезерование просрочено
+  // Сценарий из макета КП и промо-ролика: 2Д — поставка сдвинулась на 2 дня, черновая обработка плит просрочена
   const p2 = id('SELECT id FROM projects WHERE code = ?', '2Д');
   const st2 = db.prepare('SELECT * FROM project_stages WHERE project_id = ? ORDER BY pos').all(p2);
   const late = 'Поставщик отгрузил металлопрокат с опозданием на 2 дня';
@@ -145,7 +145,7 @@ export function seed(db, { today = getToday() } = {}) {
 
   // Пример расчёта стоимости
   const est = db.prepare('INSERT INTO estimates (title, client_id, project_id, markup_pct, vat_pct, created_by) VALUES (?, ?, ?, ?, ?, ?)')
-    .run('Вырубной штамп — Компания Б', id('SELECT id FROM clients WHERE name = ?', 'Компания Б'), p2, 25, 22, salesId);
+    .run('Пресс-форма корпуса — Компания Б', id('SELECT id FROM clients WHERE name = ?', 'Компания Б'), p2, 25, 22, salesId);
   const el = db.prepare('INSERT INTO estimate_lines (estimate_id, kind, name, unit, qty, price) VALUES (?, ?, ?, ?, ?, ?)');
   const eid = Number(est.lastInsertRowid);
   el.run(eid, 'material', 'Сталь Х12МФ', 'кг', 42, 650);
