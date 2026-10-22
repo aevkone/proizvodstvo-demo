@@ -1,0 +1,25 @@
+{
+  "name": "proizvodstvo-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Система контроля производственных заказов и расчёта стоимости (MVP)",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.js",
+    "seed": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/seed.js --reset",
+    "build:demo": "node demo/build.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\""
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3",
+    "nodemailer": "^10.2.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2",
+    "sql.js": "^1.12.0"
+  }
+}
